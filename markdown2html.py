@@ -1,80 +1,236 @@
-import re
+#!/usr/bin/python3
 
-def parse_markdown(markdown_file):
-    """
-    Parses a markdown file to extract headings and convert them into corresponding HTML tags.
-    Also handles unordered and ordered lists.
-    """
-    with open(markdown_file, 'r') as md_file:
-        content = md_file.readlines()
 
-    # Regex for headings, unordered lists, and ordered lists
-    heading_regex = re.compile(r"^(#{1,6})\s+(.*)")
-    unordered_list_regex = re.compile(r"^-\s+(.*)")
-    ordered_list_regex = re.compile(r"^\*\s+(.*)")
+"""
+    markdown2html.py: Converts markdown files to html files.
+    Usage: markdown2html.py <inputfile.md> <outputfile.html>
+"""
 
-    # Process markdown lines and convert them into HTML
-    html_lines = []
-    in_unordered_list = False  # Track if we're inside an unordered list
-    in_ordered_list = False  # Track if we're inside an ordered list
+from sys import argv, exit, stderr, stdout
+from typing import List, Tuple
+from os import path
 
-    for line in content:
-        # Match headings
-        heading_match = heading_regex.match(line)
-        unordered_list_match = unordered_list_regex.match(line)
-        ordered_list_match = ordered_list_regex.match(line)
 
-        if heading_match:
-            # Handle headings
-            heading_level = len(heading_match.group(1))
-            heading_text = heading_match.group(2).strip()
-            html_lines.append(f"<h{heading_level}>{heading_text}</h{heading_level}>")
-            # Close any open list
-            if in_unordered_list:
-                html_lines.append("</ul>")
-                in_unordered_list = False
-            if in_ordered_list:
-                html_lines.append("</ol>")
-                in_ordered_list = False
-        elif unordered_list_match:
-            # Handle unordered lists
-            if not in_unordered_list:
-                # Open the unordered list
-                html_lines.append("<ul>")
-                in_unordered_list = True
-            if in_ordered_list:
-                # Close an ordered list if transitioning
-                html_lines.append("</ol>")
-                in_ordered_list = False
-            item_text = unordered_list_match.group(1).strip()
-            html_lines.append(f"<li>{item_text}</li>")
-        elif ordered_list_match:
-            # Handle ordered lists
-            if not in_ordered_list:
-                # Open the ordered list
-                html_lines.append("<ol>")
-                in_ordered_list = True
-            if in_unordered_list:
-                # Close an unordered list if transitioning
-                html_lines.append("</ul>")
-                in_unordered_list = False
-            item_text = ordered_list_match.group(1).strip()
-            html_lines.append(f"<li>{item_text}</li>")
+debug_state = False  # Set to True to enable debug information
+
+
+def debug(*args, **kwargs) -> None:
+    """Prints debug information."""
+
+    if debug_state:
+        stdout.write('\033[91mDEBUG: \033[96m')
+        print(*args, **kwargs)
+        stdout.write('\033[0m')
+
+
+def open_file(filename: str) -> str:
+    """Opens a file and returns the text."""
+
+    if not path.isfile(filename):
+        raise FileNotFoundError(f'Missing {filename}')
+    with open(filename, 'r') as f:
+        text = f.readlines()
+        debug(f'Opened {filename} with {len(text)} lines')
+    return text
+
+
+def save_file(filename: str, text: str) -> None:
+    """Saves the text to a file."""
+
+    if (not filename.endswith('.html')):
+        filename += '.html'
+
+    with open(filename, 'w') as f:
+        f.write(text)
+
+
+def is_markdown(line: str) -> bool:
+    """Checks if a line is a markdown line."""
+
+    return (
+        line.startswith('#')
+        or line.startswith('- ')
+        or line.startswith('* ')
+    )
+
+
+def handle_bold_and_italic(line: str) -> str:
+    """Converts markdown bold and italic to html bold and italic."""
+
+    index = 0
+    is_bold = False
+    is_underline = False
+
+    # Replace all ** with <b> and </b>
+    while (index < len(line)):
+        try:
+            # Replace all ** with <b> and </b>
+            if (line[index:index + 2] == '**'):
+                line = (
+                    line[:index] +
+                    ('</b>' if (is_bold) else '<b>')
+                    + line[index + 2:]
+                )
+                is_bold = not is_bold
+                index += 2  # Increment the index by 2 to skip the next *
+                debug(f'Found bold at index {index}, content is now {line}')
+            # Replace all __ with <u> and </u>
+            if (line[index:index + 2] == '__'):
+                line = (
+                    line[:index] +
+                    ('</em>' if (is_underline) else '<em>')
+                    + line[index + 2:]
+                )
+                is_underline = not is_underline
+                index += 2  # Increment the index by 2 to skip the next _
+                debug(f'Found underline at index {index}')
+            index += 1  # Increment the index to avoid infinite loop
+        except IndexError:
+            break
+    return line
+
+
+def get_heading_level(line: str) -> int:
+    """Returns the heading level of a markdown heading."""
+
+    level = 0
+    for char in line:
+        if char == '#':
+            level += 1
         else:
-            # Close any open lists if encountering other content
-            if in_unordered_list:
-                html_lines.append("</ul>")
-                in_unordered_list = False
-            if in_ordered_list:
-                html_lines.append("</ol>")
-                in_ordered_list = False
-            html_lines.append(line.strip())
+            break
 
-    # Ensure any remaining open list is closed
-    if in_unordered_list:
-        html_lines.append("</ul>")
-    if in_ordered_list:
-        html_lines.append("</ol>")
+    return level
 
-    # Join lines into a single string
-    return "\n".join(html_lines)
+
+def heading(line: str) -> str:
+    """Converts markdown headings to html headings."""
+
+    # level + 1 because markdown headings as space after the # symbol
+    level = get_heading_level(line)
+    # Strip removes leading and trailing whitespaces
+    heading_content = handle_bold_and_italic(line[level + 1:])
+    debug(f'Converting \'{heading_content}\' to heading level {level}')
+    return f'<h{level}>{heading_content}</h{level}>'
+
+
+def list_item(lines: List[str], index: int,
+              prefix: str, list_type: str) -> Tuple[int, List[str]]:
+    """Converts markdown unordered lists to html unordered lists."""
+
+    html = [f'<{list_type}>']
+
+    for i in range(index, len(lines)):
+        line = lines[i].strip()
+
+        if (line.startswith(prefix)):
+            li_content = handle_bold_and_italic(line[2:])
+            debug(f'Converting \'{li_content}\' to \'{list_type}\' list item')
+            html.append(f'<li>{li_content}</li>')
+            index += 1
+        else:
+            break
+    html.append(f'</{list_type}>')
+    return index, html
+
+
+def paragraph(lines: List[str], index: int) -> Tuple[
+    int,
+    str
+]:
+    """Converts markdown paragraphs to html paragraphs."""
+
+    original_index = index
+    html = []
+
+    for i in range(index, len(lines)):
+        line = handle_bold_and_italic(lines[i].strip())
+
+        if (line == '' or is_markdown(line)):
+            break
+        else:
+            debug(f'Converting \'{line}\' to paragraph')
+            html.append(line)
+            index += 1
+            debug(f'Index is now {index}, original index is {original_index}')
+
+    html_body = '\n<br/>\n'.join(html)
+    html_text = f"<p>\n{html_body}\n</p>"
+
+    if (index != original_index):
+        debug(
+            f'Converted paragraph at index {original_index},\
+ incrementing index to {index}'
+        )
+        return index, html_text
+
+    return original_index + 1, None
+
+
+def convert(lines: List[str]) -> str:
+    """Converts markdown to html."""
+
+    html: List[str] = []
+    index = 0
+
+    debug(f'Converting {len(lines)} lines of markdown to html')
+
+    # We use a while loop instead of a for loop because we need to skip lines
+    while (index < len(lines)):
+        line = lines[index].strip()  # Get the current line as a variable
+
+        if (line.startswith('#')):
+            debug(f'{line} is a heading')
+            html.append(heading(line))
+            index += 1  # Go to the next line
+            continue
+
+        is_ul_item = line.startswith('- ')
+        is_ol_item = line.startswith('* ')
+
+        if (is_ul_item or is_ol_item):
+            debug(f'{line} is a list (ul/ol) item')
+            # We need to update the index with the new value
+            index, html_list = list_item(
+                lines, index, '- ' if (is_ul_item) else '* ',
+                'ul' if (is_ul_item) else 'ol'
+            )
+            html.extend(html_list)
+            continue
+
+        # In case the line does not match above conditions
+        index, html_paragraph = paragraph(lines, index)
+        html_paragraph and html.append(html_paragraph)
+
+    return '\n'.join(html)
+
+
+def markdown2html(inputfile: str, outputfile: str) -> None:
+    """Converts markdown files to html files."""
+
+    lines = open_file(inputfile)
+    html_content = convert(lines)  # Convert markdown to html
+    save_file(outputfile, html_content)  # Save the html content to a html file
+
+
+def main() -> None:
+    """Main function starting the program"""
+
+    try:
+        if (len(argv) != 3):
+            raise ValueError('Usage: ./markdown2html.py README.md README.html')
+        markdown2html(argv[1], argv[2])
+        exit(0)  # File converted successfully
+    except ValueError as err:
+        print(err, file=stderr)
+        exit(1)  # Invalid arguments
+    except FileNotFoundError as err:
+        print(err, file=stderr)
+        exit(1)  # File not found
+    except Exception as err:
+        print(err, file=stderr)
+        exit(1)  # Unknown error occurred
+
+
+if __name__ == '__main__':
+    main()
